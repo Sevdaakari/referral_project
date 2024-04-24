@@ -7,7 +7,6 @@ import random
 import time 
 
 
-    
 def login(request):
     if request.method == "POST":
         phone_number = request.POST['phone_number']
@@ -20,35 +19,39 @@ def login(request):
             request.session['phone_number'] = phone_number
             request.session['referral_code'] = referral_code
             user.backend = 'django.contrib.auth.backends.ModelBackend'  # Specify the authentication backend
-            authenticated_user = authenticate(request, phone_number=user, referral_code=referral_code )
+            authenticated_user = authenticate(request, phone_number=user, referral_code=referral_code)
             print(f'authenticated_user {authenticated_user}')
             if authenticated_user is not None:
                 auth_login(request, authenticated_user)
-                return redirect('verification_code') 
         else:
             print('creating user')
             referral_code = ReferralCode.generate_referral_code()
             custom_user = get_or_create_custom_user(phone_number, referral_code)
-            auth_login(request, custom_user)        
-            return redirect('verification_code')   
+            print(f'referral_code {referral_code} / phone_number {phone_number} ')
+            custom_user.backend = 'django.contrib.auth.backends.ModelBackend'
+            authenticated_user = authenticate(request, phone_number=phone_number, referral_code=referral_code)
+            request.session['phone_number'] = phone_number
+            request.session['referral_code'] = referral_code
+            print(f'authenticated_user {authenticated_user}')
+            if authenticated_user is not None:
+                auth_login(request, authenticated_user)        
+        
+        return redirect('verification_code')  
+             
     return render(request, 'referral/login.html')
-
+    
 def get_or_create_custom_user(phone_number, referral_code=None):
-    # First, try to retrieve an existing user with the given phone number
     try:
         user = CustomUser.objects.get(phone_number=phone_number)
         return user
     except CustomUser.DoesNotExist:
-        # If the user does not exist, create a new one
         username = phone_number 
         user = CustomUser.objects.create_user(username=username, phone_number=phone_number, referral_code=referral_code)
         return user
     
 def check_duplicate_referral_code(referral_code):
-    # Query the ReferralCode model for any records with the same referral code
     duplicate_records = ReferralCode.objects.filter(code=referral_code)
 
-    # If any duplicate records are found, print them
     if duplicate_records.exists():
         print("Duplicate referral code found:")
         for record in duplicate_records:
@@ -60,13 +63,11 @@ def verification_code(request):
     print('now in def verification_code')
     code = generate_verification_code()
     send_verification_code(code)
-
     if request.method == "POST": 
         entered_code = request.POST.get('verification_code')
         phone_number = request.session.get('phone_number')
         print(f'entered code: {entered_code} / phone_number {phone_number}')
-        if len(entered_code) == 4 and phone_number is not None: 
-            user = get_or_create_custom_user(phone_number)                
+        if len(entered_code) == 4 and phone_number is not None:               
             return redirect('profile')
         else:
             print('User authentication failed')

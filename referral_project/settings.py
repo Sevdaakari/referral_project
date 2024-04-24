@@ -140,3 +140,6 @@ AUTHENTICATION_BACKENDS = [
     'referral.backends.CustomUserBackend',
     'django.contrib.auth.backends.ModelBackend',
 ]
+
+SESSION_COOKIE_AGE = 20
+SESSION_ENGINE = 'django.contrib.sessions.backends.db' 
