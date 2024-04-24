@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='customuser',
             name='phone_number',
-            field=models.CharField(max_length=15, unique=True),
+            field=models.CharField(max_length=15),
         ),
         migrations.CreateModel(
             name='ReferralCode',

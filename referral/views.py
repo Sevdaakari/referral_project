@@ -1,39 +1,75 @@
 from django.shortcuts import render, redirect
-from django.contrib.auth import authenticate, login, get_user_model
-from django.contrib.auth.models import User
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth import authenticate
+from django.contrib.auth import login as auth_login
 from .models import CustomUser, ReferralCode
+from django.contrib import messages
 import random
-import string
 import time 
 
+
+    
 def login(request):
     if request.method == "POST":
         phone_number = request.POST['phone_number']
         user_exists = CustomUser.objects.filter(phone_number=phone_number).exists()
         if user_exists:
             print('user exists')
-            user = CustomUser.objects.get(phone_number=phone_number)
+            user = get_or_create_custom_user(phone_number, None)
             referral_code = user.referral_code
-            print(f'referral_code {referral_code}')
+            print(f"this is user: {user} / referral_code {referral_code}")
+            request.session['phone_number'] = phone_number
+            request.session['referral_code'] = referral_code
+            user.backend = 'django.contrib.auth.backends.ModelBackend'  # Specify the authentication backend
+            authenticated_user = authenticate(request, phone_number=user, referral_code=referral_code )
+            print(f'authenticated_user {authenticated_user}')
+            if authenticated_user is not None:
+                auth_login(request, authenticated_user)
+                return redirect('verification_code') 
         else:
             print('creating user')
-            print(phone_number)
-            referral_code = generate_referral_code()
-            custom_user = CustomUser(phone_number=phone_number, referral_code=referral_code)
-            custom_user.save()        
-        return redirect('verification_code')
+            referral_code = ReferralCode.generate_referral_code()
+            custom_user = get_or_create_custom_user(phone_number, referral_code)
+            auth_login(request, custom_user)        
+            return redirect('verification_code')   
     return render(request, 'referral/login.html')
 
+def get_or_create_custom_user(phone_number, referral_code=None):
+    # First, try to retrieve an existing user with the given phone number
+    try:
+        user = CustomUser.objects.get(phone_number=phone_number)
+        return user
+    except CustomUser.DoesNotExist:
+        # If the user does not exist, create a new one
+        username = phone_number 
+        user = CustomUser.objects.create_user(username=username, phone_number=phone_number, referral_code=referral_code)
+        return user
+    
+def check_duplicate_referral_code(referral_code):
+    # Query the ReferralCode model for any records with the same referral code
+    duplicate_records = ReferralCode.objects.filter(code=referral_code)
+
+    # If any duplicate records are found, print them
+    if duplicate_records.exists():
+        print("Duplicate referral code found:")
+        for record in duplicate_records:
+            print(f"ID: {record.id}, Code: {record.code}")
+    else:
+        print("No duplicate referral codes found.")
 
 def verification_code(request): 
     print('now in def verification_code')
     code = generate_verification_code()
     send_verification_code(code)
+
     if request.method == "POST": 
         entered_code = request.POST.get('verification_code')
-        print(f'entered code: {entered_code}')
-        return render(request, 'referral/profile.html')    
+        phone_number = request.session.get('phone_number')
+        print(f'entered code: {entered_code} / phone_number {phone_number}')
+        if len(entered_code) == 4 and phone_number is not None: 
+            user = get_or_create_custom_user(phone_number)                
+            return redirect('profile')
+        else:
+            print('User authentication failed')
     return render(request, 'referral/verification_code.html')
             
 def generate_verification_code():
@@ -42,28 +78,29 @@ def generate_verification_code():
 def send_verification_code(code):
     time.sleep(2)
 
-def generate_referral_code():
-    chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
-    return ''.join(random.choices(chars, k=6))
-
 
 def profile(request):
     print("in profile")
-    user = request.user
+    phone_number = request.session.get('phone_number')
+    referral_code = request.session.get('referral_code')
+    check_duplicate_referral_code(referral_code)
+    print(f'phone_number: {phone_number} / referral_code: {referral_code}')
+    user = get_or_create_custom_user(phone_number, referral_code)
     print(f'user {user}')
-
-    activated_referral_codes = user.activated_referral_codes.all()
-    
-    if request.method == "POST":
-        referral_code = request.POST['referral_code']
-        try:
-            code_to_activate = ReferralCode.objects.get(code=referral_code)
-            user.activated_referral_codes.add(code_to_activate)
-            activated_referral_codes = user.activated_referral_codes.all()
-            return render(request, 'referral/profile.html', {'activated_referral_codes': activated_referral_codes})
-        except ReferralCode.DoesNotExist:
-            print('referral code does not exist')
-            return render(request, 'referral/profile.html', {'activated_referral_codes': activated_referral_codes})
-
-    return render(request, 'referral/profile.html', {'activated_referral_codes': activated_referral_codes})
+    if user.is_authenticated:    
+        if request.method == "POST":
+            codes = ReferralCode.objects.filter(code=referral_code)
+            if codes.exists():
+                code_to_activate = codes.first()
+                print(f'code_to_activate {code_to_activate}')
+                user.activated_referral_codes.add(code_to_activate)
+            else:
+                print('Referral code does not exist')
+                messages.error(request, 'Referral code does not exist')
+        context = {'referral_code': referral_code}        
+        activated_referral_codes = user.activated_referral_codes.all()
+        print(f'activated_referral_codes {activated_referral_codes}')
+        return render(request, 'referral/profile.html', context)
+    else:
+        return redirect('login')
 
